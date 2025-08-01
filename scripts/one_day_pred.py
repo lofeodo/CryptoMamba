@@ -131,20 +131,18 @@ def run_model(model, dataloader):
     mape = float(model.mape(preds_tensor, targets_tensor))
     return timetamps, targets, preds, loss, mape
 
-
-
-if __name__ == "__main__":
-
-    args = get_args()
-
-    config = io_tools.load_config_from_yaml(f'{ROOT}/configs/training/{args.config}.yaml')
-
+def get_preds(config: str, ckpt_path: str, data: pd.DataFrame, use_volume: bool = False, date: str = None):
+    """
+    Parameters:
+    - config: str, name of the config file, without extension, found within the configs/training folder
+    - ckpt_path: str, full path to the checkpoint file from the root folder, including the extension
+    - data_path: str, 
+    """
+    config = io_tools.load_config_from_yaml(f'{ROOT}/configs/training/{config}.yaml')
     data_config = io_tools.load_config_from_yaml(f"{ROOT}/configs/data_configs/{config.get('data_config')}.yaml")
+    use_volume = config.get('use_volume', use_volume)
+    model, normalize = load_model(config, ckpt_path)
 
-    use_volume = config.get('use_volume', args.use_volume)
-    model, normalize = load_model(config, args.ckpt_path)
-
-    data = pd.read_csv(args.data_path)
     if 'Date' in data.keys():
         data['Timestamp'] = [float(time.mktime(datetime.strptime(x, "%Y-%m-%d").timetuple())) for x in data['Date']]
     data = data.sort_values(by='Timestamp').reset_index()
@@ -161,20 +159,16 @@ if __name__ == "__main__":
                                    num_workers=1,
                                    normalize=normalize,
                                    )
-    
-    # end_date = "2024-27-10"
-    if args.date is None:
+
+    if date is None:
         end_ts = max(data['Timestamp']) + 24 * 60 * 60
     else:
-        end_ts = int(time.mktime(datetime.strptime(args.date, "%Y-%m-%d").timetuple()))
+        end_ts = int(time.mktime(datetime.strptime(date, "%Y-%m-%d").timetuple()))
     start_ts = end_ts - 14 * 24 * 60 * 60 - 60 * 60
     pred_date = datetime.fromtimestamp(end_ts).strftime("%Y-%m-%d")
     data = data[data['Timestamp'] < end_ts]
     data = data[data['Timestamp'] >= start_ts - 60 * 60]
 
-    txt_file = init_dirs(args, pred_date)
-    
-    
     features = {}
     key_list = ['Timestamp', 'Open', 'High', 'Low', 'Close']
     if use_volume:
@@ -207,6 +201,16 @@ if __name__ == "__main__":
     with torch.no_grad():
         pred = float(model(x[None, ...].cuda()).cpu()) * scale_pred + shift_pred
 
+    return pred, today, pred_date
+
+if __name__ == "__main__":
+
+    args = get_args()
+
+    pred, today, pred_date = get_preds(args.config, args.use_volume, args.ckpt_path, pd.read_csv(args.data_path), args.date)
+
+    txt_file = init_dirs(args, pred_date)
+
     print('')
     print_and_write(txt_file, f'Prediction date: {pred_date}\nPrediction: {round(pred, 2)}\nToday value: {round(today, 2)}')
 
@@ -227,9 +231,3 @@ if __name__ == "__main__":
         print_and_write(txt_file, f'Vanilla trade: sell')
     else:
         print_and_write(txt_file, f'Vanilla trade: -')
-
-    
-
-    
-
-
